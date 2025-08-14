@@ -1,0 +1,6 @@
+{
+  "name": "AI Agent Flowchart",
+  "description": "A web application to create and run customizable AI agent flowcharts. Users can define agents, connect them, and process an initial question through the flow using Gemini API.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
