@@ -3,8 +3,8 @@ import { AgentNode, NodeType, AgentEdge } from '../types'; // Added AgentEdge
 
 interface AgentEditPanelProps {
   node: AgentNode | null;
-  allNodes: AgentNode[]; // New: all nodes for context
-  edges: AgentEdge[]; // New: all edges for context
+  allNodes: AgentNode[];
+  edges: AgentEdge[];
   onUpdateDescription: (nodeId: string, description: string) => void;
   onStartConnection: (nodeId: string) => void;
   onDeleteNode: (nodeId: string) => void;
@@ -12,9 +12,21 @@ interface AgentEditPanelProps {
   onDeleteEdgeFromSource: (sourceNodeId: string) => void;
   onDeleteEdgeToTarget: (targetNodeId: string) => void;
   onToggleInternetSearch?: (nodeId: string, enabled: boolean) => void;
-  onUpdateEdgeKeyword: (edgeId: string, keyword: string) => void; // New prop
+  onUpdateEdgeKeyword: (edgeId: string, keyword: string) => void;
 }
 
+/**
+ * @what A React component that provides a form to edit the properties of a selected node.
+ * @why This panel is the primary user interface for configuring agents, managing their connections,
+ * and setting up conditional logic.
+ * @how It receives the currently selected `node` and callback functions for updates as props.
+ * It uses local state (`description`, `enableInternetSearch`) to manage form inputs and syncs them with the
+ * global state via the callback props (`onUpdateDescription`, `onToggleInternetSearch`) on blur or change.
+ * It conditionally renders different UI elements based on the node's type (e.g., showing keyword inputs
+ * for conditional agents' outgoing edges).
+ * @param {AgentEditPanelProps} props - The properties for the component.
+ * @returns {React.ReactElement} A form panel for editing a node.
+ */
 const AgentEditPanel: React.FC<AgentEditPanelProps> = ({ 
   node, 
   allNodes,
@@ -31,6 +43,13 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
   const [description, setDescription] = useState('');
   const [enableInternetSearch, setEnableInternetSearch] = useState(false);
 
+  /**
+   * @what A React hook that synchronizes the panel's local state with the selected node's properties.
+   * @why When the user selects a new node, the form fields in this panel must update to show
+   * the correct data for that node.
+   * @how It triggers whenever the `node` prop changes. If a node is selected, it updates the
+   * local `description` and `enableInternetSearch` state with the values from the `node` object.
+   */
   useEffect(() => {
     if (node) {
       setDescription(node.description);
@@ -38,6 +57,7 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
     }
   }, [node]);
 
+  // If no node is selected, display a placeholder message.
   if (!node) {
     return (
       <div className="p-4 bg-white dark:bg-gray-800 shadow-lg rounded-lg h-full">
@@ -46,16 +66,29 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
     );
   }
 
+  /**
+   * @what Handles changes to the description textarea input.
+   * @how Updates the local `description` state as the user types.
+   */
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setDescription(e.target.value);
   };
 
+  /**
+   * @what Triggers the parent state update when the user finishes editing the description.
+   * @how Calls the `onUpdateDescription` callback when the textarea loses focus.
+   */
   const handleDescriptionBlur = () => {
     if (node) {
       onUpdateDescription(node.id, description);
     }
   };
 
+  /**
+   * @what Handles toggling the "Enable Internet Search" checkbox.
+   * @how It updates the local `enableInternetSearch` state and immediately calls the
+   * `onToggleInternetSearch` callback to update the global state.
+   */
   const handleInternetSearchToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (node && onToggleInternetSearch) {
       const checked = e.target.checked;
@@ -64,10 +97,12 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
     }
   };
   
+  // Determine capabilities based on node type.
   const canConnectFrom = node.type !== NodeType.END;
   const canDelete = node.type !== NodeType.START && node.type !== NodeType.END;
   const displayNodeType = node.type.toString().replace(/_/g, ' ');
 
+  // Find all edges that originate from the currently selected node.
   const outgoingEdgesFromThisNode = edges.filter(edge => edge.sourceId === node.id);
 
   return (
@@ -85,6 +120,7 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
         />
       </div>
 
+      {/* Render description and internet search toggle for agent types */}
       {(node.type === NodeType.AGENT || node.type === NodeType.CONDITIONAL_AGENT) && (
         <>
           <div>
@@ -123,6 +159,7 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
         </>
       )}
 
+      {/* Render conditional path keyword inputs if the node is a conditional agent with outgoing edges */}
       {node.type === NodeType.CONDITIONAL_AGENT && outgoingEdgesFromThisNode.length > 0 && (
         <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
           <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-1 mb-1">Conditional Paths & Keywords:</h4>
@@ -150,6 +187,7 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
         </div>
       )}
 
+       {/* Display informational text for START and END nodes */}
        {node.type === NodeType.START && (
          <p className="text-sm text-gray-600 dark:text-gray-400">The START node initiates the flow with the user's question.</p>
        )}

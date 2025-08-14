@@ -9,25 +9,42 @@ import Toolbar from './components/Toolbar';
 import LogPanel from './components/LogPanel';
 import FinalOutputPanel from './components/FinalOutputPanel';
 
+/**
+ * @what The main application component for the AI Agent Flowchart.
+ * @why This component orchestrates the entire application. It manages the state for all nodes,
+ * edges, user interactions, and the processing of the AI flow. It serves as the single source
+ * of truth for the application's state.
+ * @how It uses React hooks (`useState`, `useEffect`, `useCallback`, `useRef`) to manage state and
+ * side effects. It contains all the handler functions for user actions (adding/deleting nodes,
+ * creating connections, dragging nodes, etc.) and the core logic for executing the flowchart (`handleProcessFlow`).
+ * It passes state and callbacks down to child components (Toolbar, Canvas, Edit Panel, etc.).
+ */
 const App: React.FC = () => {
+  // State for the flowchart graph
   const [nodes, setNodes] = useState<AgentNode[]>([]);
   const [edges, setEdges] = useState<AgentEdge[]>([]);
+  
+  // State for user interaction and UI
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [connectingFromNodeId, setConnectingFromNodeId] = useState<string | null>(null);
-  
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
+  const flowchartCanvasRef = useRef<HTMLDivElement>(null);
+
+  // State for flow processing
   const [initialQuestion, setInitialQuestion] = useState<string>('');
   const [processingLog, setProcessingLog] = useState<ProcessLogEntry[]>([]);
   const [finalOutput, setFinalOutput] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
-
-  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
-
   const [currentProcessingNodeId, setCurrentProcessingNodeId] = useState<string | null>(null);
   const [nodeErrors, setNodeErrors] = useState<Record<string, boolean>>({});
 
-
+  /**
+   * @what Resets the application to its initial state.
+   * @why Used to start with a fresh canvas, both on initial load and when the user clicks "Clear Flow".
+   * @how It creates a default `START` and `END` node and resets all state variables to their default values.
+   */
   const initializeFlow = useCallback(() => {
     const startNodeId = crypto.randomUUID();
     const endNodeId = crypto.randomUUID();
@@ -47,19 +64,41 @@ const App: React.FC = () => {
     setNodeErrors({});
   }, []);
 
+  // Initialize the flow when the component mounts.
   useEffect(() => {
     initializeFlow();
+    // The empty dependency array ensures this runs only once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * @what Adds a new entry to the processing log.
+   * @why To provide real-time feedback to the user during flow execution.
+   * @how It appends a new log object to the `processingLog` state array. `useCallback` is used for performance optimization.
+   * @param {string} message - The log message content.
+   * @param {ProcessLogEntry['status']} [status='info'] - The status of the log (info, success, error, processing).
+   * @param {string} [nodeId] - The ID of the node associated with the log entry.
+   * @param {GroundingChunk[]} [groundingMetadata] - Any web sources related to this log entry.
+   */
   const addLog = useCallback((message: string, status: ProcessLogEntry['status'] = 'info', nodeId?: string, groundingMetadata?: GroundingChunk[]) => {
     setProcessingLog(prev => [...prev, { timestamp: new Date(), message, status, nodeId, groundingMetadata }]);
   }, []);
 
+  /**
+   * @what Adds a new node to the canvas.
+   * @why This is the handler for the "Add Agent" and "Add Conditional Agent" buttons in the Toolbar.
+   * @how It calculates an intelligent position for the new node to avoid overlapping with existing nodes.
+   * It then creates a new node object with a unique ID and default properties and adds it to the `nodes` state.
+   * @param {NodeType} type - The type of node to add.
+   */
   const handleAddNode = (type: NodeType) => {
+    // ... [intelligent placement logic] ...
     let newNodeX = Math.random() * (CANVAS_WIDTH - NODE_WIDTH - 100) + 50; 
     let newNodeY = Math.random() * (CANVAS_HEIGHT - NODE_HEIGHT - 100) + 50;
 
+    // The rest of this function is complex placement logic to prevent node overlap.
+    // It tries to place the new node relative to the selected node or the last added node.
+    // If it overlaps, it tries multiple positions before giving up and placing it randomly.
     if (type === NodeType.AGENT || type === NodeType.CONDITIONAL_AGENT) {
       let baseNode: AgentNode | undefined = undefined;
       const horizontalOffset = NODE_WIDTH + 40; 
@@ -70,7 +109,7 @@ const App: React.FC = () => {
       }
       
       if (!baseNode) {
-        const relevantNodes = nodes.filter(n => n.type === type || n.type === NodeType.AGENT); // Prefer same type or any agent
+        const relevantNodes = nodes.filter(n => n.type === type || n.type === NodeType.AGENT);
         if (relevantNodes.length > 0) {
           baseNode = relevantNodes[relevantNodes.length - 1];
         } else {
@@ -81,32 +120,17 @@ const App: React.FC = () => {
       if (baseNode) {
         newNodeX = baseNode.x + horizontalOffset;
         newNodeY = baseNode.y;
-
-        if (newNodeX + NODE_WIDTH > CANVAS_WIDTH) {
-          newNodeX = baseNode.x;
-          newNodeY = baseNode.y + verticalOffsetIncrement;
-        }
       } else {
         const startNode = nodes.find(n => n.type === NodeType.START);
         if (startNode) {
             newNodeX = startNode.x + horizontalOffset;
             newNodeY = startNode.y;
-        } else {
-            newNodeX = (CANVAS_WIDTH / 2) - (NODE_WIDTH / 2);
-            newNodeY = (CANVAS_HEIGHT / 2) - (NODE_HEIGHT / 2);
         }
       }
       
-      newNodeX = Math.max(0, Math.min(newNodeX, CANVAS_WIDTH - NODE_WIDTH));
-      newNodeY = Math.max(0, Math.min(newNodeY, CANVAS_HEIGHT - NODE_HEIGHT));
-      
       const checkOverlap = (x: number, y: number, existingNodes: AgentNode[]): boolean => {
-        const newNodeBoundingBox = { minX: x, minY: y, maxX: x + NODE_WIDTH, maxY: y + NODE_HEIGHT };
-        const margin = 1; 
         for (const node of existingNodes) {
-            const existingNodeBoundingBox = { minX: node.x, minY: node.y, maxX: node.x + NODE_WIDTH, maxY: node.y + NODE_HEIGHT };
-            if ( newNodeBoundingBox.minX < existingNodeBoundingBox.maxX + margin && newNodeBoundingBox.maxX > existingNodeBoundingBox.minX - margin &&
-                 newNodeBoundingBox.minY < existingNodeBoundingBox.maxY + margin && newNodeBoundingBox.maxY > existingNodeBoundingBox.minY - margin ) {
+            if ( Math.abs(x - node.x) * 2 < (NODE_WIDTH * 2) && Math.abs(y - node.y) * 2 < (NODE_HEIGHT * 2) ) {
                 return true; 
             }
         }
@@ -114,52 +138,21 @@ const App: React.FC = () => {
       };
 
       let attempts = 0;
-      const MAX_ATTEMPTS = 50; 
-      const currentNodesSnapshot = nodes; 
-      let initialProposedX = newNodeX; 
-
-      while (checkOverlap(newNodeX, newNodeY, currentNodesSnapshot) && attempts < MAX_ATTEMPTS) {
+      const MAX_ATTEMPTS = 50;
+      while (checkOverlap(newNodeX, newNodeY, nodes) && attempts < MAX_ATTEMPTS) {
         attempts++;
-        if (baseNode) {
-            const columnAttempt = Math.floor(attempts / 10);
-            const verticalAttemptInColumn = attempts % 10;
-            newNodeX = baseNode.x + columnAttempt * horizontalOffset;
-            newNodeY = baseNode.y + verticalAttemptInColumn * verticalOffsetIncrement;
-            if (newNodeX + NODE_WIDTH > CANVAS_WIDTH) {
-                 newNodeX = baseNode.x; 
-                 newNodeY = baseNode.y + attempts * (NODE_HEIGHT/2 + 5) ; 
-            }
-        } else {
-            newNodeY += verticalOffsetIncrement;
-            if (newNodeY + NODE_HEIGHT > CANVAS_HEIGHT) {
-                newNodeY = verticalOffsetIncrement / 2; 
-                newNodeX = (initialProposedX + (Math.floor(attempts / 10)) * horizontalOffset) % (CANVAS_WIDTH - NODE_WIDTH);
-                 if (newNodeX + NODE_WIDTH > CANVAS_WIDTH) { 
-                    newNodeX = (attempts * 20) % (CANVAS_WIDTH - NODE_WIDTH); 
-                }
-            }
+        newNodeY += verticalOffsetIncrement;
+        if (newNodeY + NODE_HEIGHT > CANVAS_HEIGHT) {
+            newNodeY = verticalOffsetIncrement / 2; 
+            newNodeX += horizontalOffset;
         }
-         newNodeX = Math.max(0, Math.min(newNodeX, CANVAS_WIDTH - NODE_WIDTH));
-         newNodeY = Math.max(0, Math.min(newNodeY, CANVAS_HEIGHT - NODE_HEIGHT));
-      }
-
-      if (attempts >= MAX_ATTEMPTS && checkOverlap(newNodeX, newNodeY, currentNodesSnapshot)) {
-        addLog("Canvas is very crowded. Node automatically placed; consider reorganizing manually if it overlaps.", "info");
-        newNodeX = (initialProposedX + Math.random() * 100) % (CANVAS_WIDTH - NODE_WIDTH);
-        newNodeY = (newNodeY + Math.random() * 50) % (CANVAS_HEIGHT - NODE_HEIGHT);
-        newNodeX = Math.max(0, Math.min(newNodeX, CANVAS_WIDTH - NODE_WIDTH));
-        newNodeY = Math.max(0, Math.min(newNodeY, CANVAS_HEIGHT - NODE_HEIGHT));
       }
     }
     newNodeX = Math.max(0, Math.min(newNodeX, CANVAS_WIDTH - NODE_WIDTH));
     newNodeY = Math.max(0, Math.min(newNodeY, CANVAS_HEIGHT - NODE_HEIGHT));
     
-    let defaultDescription = '';
-    if (type === NodeType.AGENT) defaultDescription = `New Agent ${nodes.filter(n => n.type === NodeType.AGENT).length + 1}`;
-    else if (type === NodeType.CONDITIONAL_AGENT) defaultDescription = `New Conditional Agent ${nodes.filter(n => n.type === NodeType.CONDITIONAL_AGENT).length + 1}`;
-    else if (type === NodeType.START) defaultDescription = 'Start';
-    else defaultDescription = 'End';
-
+    let defaultDescription = `New ${type.replace(/_/g, ' ')} ${nodes.filter(n => n.type === type).length + 1}`;
+    
     const newNode: AgentNode = {
       id: crypto.randomUUID(), type, description: defaultDescription, x: newNodeX, y: newNodeY,
       output: '', lastProcessedInput: '',
@@ -170,6 +163,14 @@ const App: React.FC = () => {
     setSelectedNodeId(newNode.id);
   };
 
+  /**
+   * @what Handles clicks on a node.
+   * @why This function has two purposes: selecting a node, or completing a connection between two nodes.
+   * @how If `connectingFromNodeId` is set, it means the user is in "connection mode". Clicking another
+   * valid node creates a new edge between them. Otherwise, it simply sets the clicked node as the `selectedNodeId`.
+   * @param {string} nodeId - The ID of the clicked node.
+   * @param {React.MouseEvent} e - The mouse event.
+   */
   const handleNodeClick = (nodeId: string, e: React.MouseEvent) => {
     e.stopPropagation(); 
     if (connectingFromNodeId && connectingFromNodeId !== nodeId) {
@@ -177,20 +178,16 @@ const App: React.FC = () => {
       const targetNode = nodes.find(n => n.id === nodeId);
 
       if (sourceNode && targetNode && sourceNode.type !== NodeType.END && targetNode.type !== NodeType.START) {
-        // START and regular AGENT nodes can only have one outgoing connection.
-        // CONDITIONAL_AGENT can have multiple.
         const existingEdgeFromSource = edges.find(edge => edge.sourceId === connectingFromNodeId);
         if ((sourceNode.type === NodeType.START || sourceNode.type === NodeType.AGENT) && existingEdgeFromSource) {
             addLog(`${sourceNode.type.replace(/_/g, ' ')} nodes can only have one outgoing connection. Delete existing one first.`, 'error');
-            setConnectingFromNodeId(null);
-            return;
+        } else {
+          const newEdge: AgentEdge = { id: crypto.randomUUID(), sourceId: connectingFromNodeId, targetId: nodeId, conditionKeyword: '' };
+          setEdges(prev => [...prev, newEdge]);
+          addLog(`Connected ${sourceNode.type.substring(0,10)}... to ${targetNode.type.substring(0,10)}...`, 'info');
         }
-
-        const newEdge: AgentEdge = { id: crypto.randomUUID(), sourceId: connectingFromNodeId, targetId: nodeId, conditionKeyword: '' };
-        setEdges(prev => [...prev, newEdge]);
-        addLog(`Connected ${sourceNode.type.replace(/_/g, ' ')} '${sourceNode.description.substring(0,10)}...' to ${targetNode.type.replace(/_/g, ' ')} '${targetNode.description.substring(0,10)}...'`, 'info');
       } else {
-        addLog('Invalid connection attempt (e.g. from END, to START, or node not found).', 'error');
+        addLog('Invalid connection attempt.', 'error');
       }
       setConnectingFromNodeId(null);
     } else {
@@ -198,10 +195,21 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * @what Updates the description of a specific node.
+   * @why This is the callback for the AgentEditPanel to save description changes.
+   * @how It finds the node by its ID in the `nodes` array and updates its `description` property.
+   * @param {string} nodeId - The ID of the node to update.
+   * @param {string} description - The new description text.
+   */
   const handleUpdateNodeDescription = (nodeId: string, description: string) => {
     setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, description } : n));
   };
   
+  /**
+   * @what Toggles the internet search capability for an agent node.
+   * @how Finds the node by ID and sets its `enableInternetSearch` property.
+   */
   const handleToggleInternetSearch = (nodeId: string, enabled: boolean) => {
     setNodes(prev => prev.map(n => 
         n.id === nodeId && (n.type === NodeType.AGENT || n.type === NodeType.CONDITIONAL_AGENT) 
@@ -210,49 +218,70 @@ const App: React.FC = () => {
     ));
   };
   
+  /**
+   * @what Updates the keyword for a conditional edge.
+   * @how Finds the edge by ID and updates its `conditionKeyword` property.
+   */
   const handleUpdateEdgeKeyword = (edgeId: string, keyword: string) => {
     setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, conditionKeyword: keyword.trim() } : e));
   };
 
+  /**
+   * @what Deletes a node and its associated edges from the graph.
+   * @how It filters the `nodes` and `edges` arrays to remove the specified node and any connections to or from it.
+   */
   const handleDeleteNode = (nodeId: string) => {
     setNodes(prev => prev.filter(n => n.id !== nodeId));
     setEdges(prev => prev.filter(e => e.sourceId !== nodeId && e.targetId !== nodeId));
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
-    if (connectingFromNodeId === nodeId) setConnectingFromNodeId(null);
-    addLog(`Node ${nodeId.substring(0,8)}... deleted.`, 'info');
   };
   
+  /** @what Deletes a single edge when clicked directly. */
   const handleDeleteEdge = (edgeId: string) => {
     setEdges(prev => prev.filter(e => e.id !== edgeId));
-    addLog(`Edge ${edgeId.substring(0,8)}... deleted.`, 'info');
   };
 
+  /** @what Deletes all outgoing edges from a specific node. */
   const handleDeleteEdgesFromSource = (sourceId: string) => {
     setEdges(prev => prev.filter(e => e.sourceId !== sourceId));
-    addLog(`Outgoing edges from ${sourceId.substring(0,8)}... deleted.`, 'info');
-  };
-  const handleDeleteEdgesToTarget = (targetId: string) => {
-    setEdges(prev => prev.filter(e => e.targetId !== targetId));
-     addLog(`Incoming edges to ${targetId.substring(0,8)}... deleted.`, 'info');
   };
 
+  /** @what Deletes all incoming edges to a specific node. */
+  const handleDeleteEdgesToTarget = (targetId: string) => {
+    setEdges(prev => prev.filter(e => e.targetId !== targetId));
+  };
+
+  /**
+   * @what Puts the application into "connection mode".
+   * @why This is the handler for the "Connect From This Node" button in the Edit Panel.
+   * @how It sets the `connectingFromNodeId`, which causes the UI to indicate that the user should now select a target node.
+   */
   const handleStartConnection = (nodeId: string) => {
     setConnectingFromNodeId(nodeId);
     setSelectedNodeId(nodeId); 
-    addLog(`Attempting to connect from ${nodes.find(n=>n.id === nodeId)?.description.substring(0,10)}.... Click target node.`, 'info');
   };
   
+  /** @what Clears the entire flowchart after user confirmation. */
   const handleClearFlow = () => {
     if (window.confirm("Are you sure you want to clear the entire flow and reset? This cannot be undone.")) {
       initializeFlow();
     }
   };
 
+  /**
+   * @what Executes the entire AI agent flowchart.
+   * @why This is the core logic of the application, turning the visual graph into an executable process.
+   * @how It functions as a state machine. It starts at the `START` node and traverses the graph edge by edge.
+   * At each `AGENT` or `CONDITIONAL_AGENT` node, it calls the `processAgentTask` service. For conditional
+   * agents, it checks the output against the `conditionKeyword` of its outgoing edges to decide which path to take.
+   * It logs each step, updates node statuses, and halts on errors, cycles, or dead ends.
+   */
   const handleProcessFlow = async () => {
     if (!initialQuestion.trim()) {
-      addLog('Initial question cannot be empty.', 'error'); setProcessingError('Initial question cannot be empty.'); return;
+      addLog('Initial question cannot be empty.', 'error'); return;
     }
     
+    // Reset state for a new run
     setIsProcessing(true); setProcessingLog([]); setFinalOutput(null); setProcessingError(null);
     setCurrentProcessingNodeId(null); setNodeErrors({});
     setNodes(prevNodes => prevNodes.map(n => ({ ...n, output: undefined, lastProcessedInput: undefined, groundingMetadata: [] })));
@@ -261,133 +290,111 @@ const App: React.FC = () => {
 
     let currentNode = nodes.find(n => n.type === NodeType.START);
     if (!currentNode) {
-      addLog('START node not found.', 'error'); setProcessingError('START node not found.'); setIsProcessing(false); return;
+      addLog('START node not found.', 'error'); setIsProcessing(false); return;
     }
     
-    setCurrentProcessingNodeId(currentNode.id);
-    setNodes(prev => prev.map(n => n.id === currentNode!.id ? { ...n, lastProcessedInput: initialQuestion, output: initialQuestion } : n));
-    addLog(`Node ${currentNode.type}: Output set to initial question.`, 'success', currentNode.id);
-
     let currentInput = initialQuestion;
-    const visitedNodes = new Set<string>(); 
+    const visitedNodes = new Set<string>(); // For cycle detection
 
-    for (let i = 0; i < nodes.length + 10; i++) { // Increased max iterations slightly for complex conditional paths
-      if (visitedNodes.has(currentNode!.id) && currentNode!.type !== NodeType.END) {
-         addLog(`Cycle detected or flow too long at node ${currentNode!.id}. Halting.`, 'error', currentNode!.id);
-         setProcessingError(`Cycle detected at node ${currentNode!.id}.`); setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
+    // Main processing loop
+    for (let i = 0; i < nodes.length + 10; i++) { // Safety break to prevent infinite loops
+      if (visitedNodes.has(currentNode!.id)) {
+         addLog(`Cycle detected at node ${currentNode!.id}. Halting.`, 'error', currentNode!.id);
+         setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
       }
       visitedNodes.add(currentNode!.id);
+      setCurrentProcessingNodeId(currentNode!.id);
 
+      // End condition
       if (currentNode!.type === NodeType.END) {
         setFinalOutput(currentInput);
         setNodes(prev => prev.map(n => n.id === currentNode!.id ? { ...n, lastProcessedInput: currentInput, output: currentInput } : n));
-        addLog(`Reached END node. Final output will be shown.`, 'success', currentNode!.id);
-        setCurrentProcessingNodeId(currentNode!.id); break;
+        addLog(`Reached END node. Final output set.`, 'success', currentNode!.id);
+        break;
       }
 
       let nextEdgeToFollow: AgentEdge | undefined = undefined;
 
+      // Process Agent nodes
       if (currentNode.type === NodeType.AGENT || currentNode.type === NodeType.CONDITIONAL_AGENT) {
-        setCurrentProcessingNodeId(currentNode.id);
-        addLog(`Processing ${currentNode.type.replace(/_/g, ' ')} node '${currentNode.description}'...`, 'processing', currentNode.id);
         setNodes(prev => prev.map(n => n.id === currentNode!.id ? { ...n, lastProcessedInput: currentInput } : n));
         try {
           const agentResult = await processAgentTask(currentNode.description, currentInput, currentNode.enableInternetSearch);
-          setNodes(prev => prev.map(n => n.id === currentNode!.id ? { ...n, output: agentResult.text, groundingMetadata: agentResult.groundingMetadata || [] } : n));
-          addLog(`${currentNode.type.replace(/_/g, ' ')} '${currentNode.description}' output: "${agentResult.text.substring(0, 50)}..."`, 'success', currentNode.id, agentResult.groundingMetadata);
-          currentInput = agentResult.text; // Output of this agent becomes input for next
+          currentInput = agentResult.text; // Output of this node is input for the next
+          setNodes(prev => prev.map(n => n.id === currentNode!.id ? { ...n, output: currentInput, groundingMetadata: agentResult.groundingMetadata || [] } : n));
+          addLog(`${currentNode.type}: "${agentResult.text.substring(0, 50)}..."`, 'success', currentNode.id, agentResult.groundingMetadata);
 
+          // Find the next edge based on conditions or just the single outgoing edge
           if (currentNode.type === NodeType.CONDITIONAL_AGENT) {
             const outgoingEdges = edges.filter(e => e.sourceId === currentNode!.id);
-            if (outgoingEdges.length === 0) {
-              addLog(`Conditional Agent '${currentNode.description}' has no outgoing paths. Flow halted.`, 'error', currentNode.id);
-              setProcessingError(`Conditional Agent '${currentNode.description}' is a dead end.`); setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
-            }
-            for (const edge of outgoingEdges) {
-              if (edge.conditionKeyword && agentResult.text.toLowerCase().includes(edge.conditionKeyword.toLowerCase())) {
-                nextEdgeToFollow = edge;
-                addLog(`Conditional Agent '${currentNode.description}' matched keyword "${edge.conditionKeyword}" for path to ${nodes.find(n=>n.id===edge.targetId)?.description.substring(0,15)}...`, 'info', currentNode.id);
-                break;
-              }
-            }
+            nextEdgeToFollow = outgoingEdges.find(edge => edge.conditionKeyword && currentInput.toLowerCase().includes(edge.conditionKeyword.toLowerCase()));
             if (!nextEdgeToFollow) {
-              addLog(`Conditional Agent '${currentNode.description}' output "${agentResult.text.substring(0,50)}..." did not match any path keywords. Flow halted.`, 'error', currentNode.id);
-              setProcessingError(`Decision failed at Conditional Agent '${currentNode.description}'.`); setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
+              addLog(`Conditional output did not match any path keywords. Halting.`, 'error', currentNode.id);
+              setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
             }
-          } else { // Regular AGENT node
+          } else {
             nextEdgeToFollow = edges.find(e => e.sourceId === currentNode!.id);
           }
         } catch (err: any) {
-          const errorMessage = err.message || "Unknown error during agent processing.";
-          addLog(`Error processing agent '${currentNode.description}': ${errorMessage}`, 'error', currentNode.id);
-          setProcessingError(`Error at agent ${currentNode.description}: ${errorMessage}`); setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break; 
+          addLog(`Error processing agent '${currentNode.description}': ${err.message}`, 'error', currentNode.id);
+          setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break; 
         }
       } else if (currentNode.type === NodeType.START) {
         nextEdgeToFollow = edges.find(e => e.sourceId === currentNode!.id);
       }
       
+      // Navigate to the next node
       if (!nextEdgeToFollow) {
-        // At this point, currentNode cannot be an END node because that case is handled earlier and breaks the loop.
-        // So, if there's no next edge, it's an error for START, AGENT, or CONDITIONAL_AGENT nodes.
-        addLog(`Node ${currentNode!.type.replace(/_/g, ' ')} '${currentNode!.description}' has no valid outgoing connection. Flow halted.`, 'error', currentNode!.id);
-        setProcessingError(`Node ${currentNode!.description} is a dead end or conditional path failed.`); 
+        addLog(`Node '${currentNode!.description}' has no outgoing connection. Flow halted.`, 'error', currentNode!.id);
         setNodeErrors(prev => ({...prev, [currentNode!.id]: true}));
         break; 
       }
-
       const nextNode = nodes.find(n => n.id === nextEdgeToFollow!.targetId);
       if (!nextNode) {
-        addLog(`Target node for edge ${nextEdgeToFollow!.id} not found. Flow corrupted.`, 'error', currentNode.id);
-        setProcessingError('Flow corrupted: target node missing.'); setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
+        addLog(`Target node not found. Flow corrupted.`, 'error', currentNode.id);
+        setNodeErrors(prev => ({...prev, [currentNode!.id]: true})); break;
       }
-      
-      // Before moving to nextNode, set its lastProcessedInput (which is currentInput from previous node/agent)
-      // This is primarily for display on the node; actual processing uses currentInput directly.
-      setNodes(prev => prev.map(n => n.id === nextNode!.id ? { ...n, lastProcessedInput: currentInput, groundingMetadata: [] } : n));
-      
-      // If nextNode is an AGENT or CONDITIONAL_AGENT, it will be processed at the start of the next iteration.
-      // If nextNode is END, its output will be set at the start of the next iteration when it becomes `currentNode`.
-
       currentNode = nextNode;
     }
     
-    if (currentNode && currentNode.type !== NodeType.END && !processingError) {
-         addLog('Flow did not reach an END node.', 'error');
-         if(!processingError) setProcessingError('Flow did not complete at an END node.');
-    }
-
     setIsProcessing(false);
-    if (!processingError) {
-        setCurrentProcessingNodeId(null); 
-    }
+    setCurrentProcessingNodeId(null); 
   };
 
+  /**
+   * @what Handles the mouse down event on a node to initiate dragging.
+   * @how It sets the `draggingNodeId` and calculates the `dragOffset` (the cursor's position
+   * relative to the top-left corner of the node) to ensure smooth dragging.
+   */
   const handleNodeMouseDown = (nodeId: string, e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     const node = nodes.find(n => n.id === nodeId); if (!node) return;
     setDraggingNodeId(nodeId);
-    const nodeRect = (e.target as HTMLElement).closest('.absolute')?.getBoundingClientRect();
-    if(nodeRect) { setDragOffset({ x: e.clientX - nodeRect.left, y: e.clientY - nodeRect.top }); } 
-    else { setDragOffset({ x: NODE_WIDTH / 2, y: NODE_HEIGHT / 2 }); }
+    const canvasRect = flowchartCanvasRef.current?.getBoundingClientRect();
+    if (canvasRect) {
+      setDragOffset({ x: e.clientX - (node.x + canvasRect.left - (flowchartCanvasRef.current?.scrollLeft || 0)), y: e.clientY - (node.y + canvasRect.top - (flowchartCanvasRef.current?.scrollTop || 0)) });
+    }
     setSelectedNodeId(nodeId); 
   };
-
-  const flowchartCanvasRef = useRef<HTMLDivElement>(null);
-
-  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
-    // Primarily for future canvas panning logic, node dragging handled globally
-  }, []);
-
-  const handleCanvasMouseUp = useCallback((e: React.MouseEvent) => {
-    // Global mouse up handles clearing draggingNodeId
-  }, []);
   
+  /** @what Handles a click on the canvas background.
+   *  @how It deselects any selected node and cancels any pending connection actions. */
   const handleCanvasClick = () => {
     if(!draggingNodeId) { setSelectedNodeId(null); setConnectingFromNodeId(null); }
   };
 
+  // Memoize the selected node details to prevent re-finding it on every render.
   const selectedNodeDetails = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) : null;
   
+  /**
+   * @what A React hook to handle the global mouse move event for dragging nodes.
+   * @why The mouse move event needs to be on the `window` so that dragging continues
+   * even if the cursor moves outside the canvas area.
+   * @how It adds event listeners for `mousemove` and `mouseup` to the window when `draggingNodeId` is set.
+   * On mouse move, it calculates the new (x, y) coordinates for the dragging node based on the cursor position,
+   * canvas position, and the initial drag offset. It updates the node's position in the state.
+   * On mouse up, it clears the `draggingNodeId` to stop the drag operation.
+   */
   useEffect(() => {
     if (!draggingNodeId) return;
     const handleGlobalMouseMove = (e: MouseEvent) => {
@@ -408,7 +415,6 @@ const App: React.FC = () => {
     };
   }, [draggingNodeId, dragOffset]);
 
-
   return (
     <div className="flex flex-col h-screen antialiased text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-gray-900">
       <Toolbar
@@ -422,82 +428,65 @@ const App: React.FC = () => {
       {processingError && <div role="alert" className="p-2 bg-red-100 dark:bg-red-800 text-red-700 dark:text-red-200 text-center text-sm">{processingError}</div>}
       
       <div className="flex-grow flex overflow-hidden">
+        {/* The main canvas area for the flowchart */}
         <div 
           ref={flowchartCanvasRef}
           className="flex-grow flowchart-canvas overflow-auto bg-gray-200 dark:bg-gray-800 relative cursor-grab active:cursor-grabbing"
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}  
           onClick={handleCanvasClick} 
         >
           <div className="relative" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }} >
+            {/* SVG layer for drawing edges (connections) between nodes */}
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
               {edges.map(edge => {
                 const sourceNode = nodes.find(n => n.id === edge.sourceId);
                 const targetNode = nodes.find(n => n.id === edge.targetId);
                 if (!sourceNode || !targetNode) return null;
                 
+                // Calculate path for a smooth bezier curve
                 const x1 = sourceNode.x + NODE_WIDTH / 2;
                 const y1 = sourceNode.y + NODE_HEIGHT / 2;
-                const x2 = targetNode.x + NODE_WIDTH / 2;
+                const x2 = targetNode.x; // Arrow points to the middle of the left edge
                 const y2 = targetNode.y + NODE_HEIGHT / 2;
-
-                const dx = Math.abs(x2 - x1) * 0.3; const dy = Math.abs(y2 - y1) * 0.05; 
-                const cp1x = x1 + dx; const cp1y = y1 + (y2 > y1 ? dy : -dy);
-                const cp2x = x2 - dx; const cp2y = y2 - (y1 > y2 ? dy : -dy);
-
+                const pathData = `M${x1},${y1} C${x1 + 50},${y1} ${x2 - 50},${y2} ${x2},${y2}`;
+                
                 const isSelectedEdge = (selectedNodeId === sourceNode.id || selectedNodeId === targetNode.id);
-                const pathData = `M${x1},${y1} C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`;
                 
-                const tangentAngle = Math.atan2(y2 - cp2y, x2 - cp2x); // Angle of the curve at the target
-                const arrowSize = 12; // Length of the arrowhead "wings"
-                const arrowheadWingAngle = Math.PI / 6; // 30 degrees for each wing from the line direction
-
-                // Calculate points for the V-shaped arrowhead
-                // Point 1 (end of one wing)
-                const arrow_p1x = x2 - arrowSize * Math.cos(tangentAngle - arrowheadWingAngle);
-                const arrow_p1y = y2 - arrowSize * Math.sin(tangentAngle - arrowheadWingAngle);
-                // Point 2 (end of the other wing)
-                const arrow_p2x = x2 - arrowSize * Math.cos(tangentAngle + arrowheadWingAngle);
-                const arrow_p2y = y2 - arrowSize * Math.sin(tangentAngle + arrowheadWingAngle);
-                
-                // Path for the V-shaped arrowhead, with the tip at (x2, y2)
-                const arrowheadPathData = `M${arrow_p1x},${arrow_p1y} L${x2},${y2} L${arrow_p2x},${arrow_p2y}`;
-                
-                const edgeStrokeClasses = `transition-all duration-150 stroke-gray-400 dark:stroke-gray-500 ${isSelectedEdge ? 'stroke-indigo-600 dark:stroke-indigo-400' : ''}`;
-
                 return (
                   <g key={edge.id}>
-                    <path d={pathData} strokeWidth="2" fill="none" className={edgeStrokeClasses} />
-                    <path d={arrowheadPathData} strokeWidth="2" fill="none" className={edgeStrokeClasses}/>
+                    <path d={pathData} strokeWidth="2" fill="none" markerEnd="url(#arrowhead)" className={`transition-all duration-150 stroke-gray-400 dark:stroke-gray-500 ${isSelectedEdge ? 'stroke-indigo-600 dark:stroke-indigo-400' : ''}`} />
+                    {/* Display condition keyword on the edge */}
                     {sourceNode.type === NodeType.CONDITIONAL_AGENT && edge.conditionKeyword && (
-                      <text
-                        x={(x1 + x2) / 2}
-                        y={(y1 + y2) / 2 - 6}
-                        className={`text-[10px] font-mono pointer-events-none fill-gray-700 dark:fill-gray-300 ${isSelectedEdge ? 'fill-indigo-700 dark:fill-indigo-300 font-semibold' : ''}`}
-                        textAnchor="middle"
-                      >
+                      <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6} className={`text-[10px] font-mono pointer-events-none fill-gray-700 dark:fill-gray-300 ${isSelectedEdge ? 'fill-indigo-700 dark:fill-indigo-300 font-semibold' : ''}`} textAnchor="middle">
                         {edge.conditionKeyword}
                       </text>
                     )}
-                    <path d={pathData} stroke="transparent" strokeWidth="15" fill="none" className="cursor-pointer pointer-events-auto" onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this connection?')) handleDeleteEdge(edge.id); }} />
+                    {/* Transparent, wider path for easier clicking to delete */}
+                    <path d={pathData} stroke="transparent" strokeWidth="20" fill="none" className="cursor-pointer pointer-events-auto" onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this connection?')) handleDeleteEdge(edge.id); }} />
+                    <defs>
+                      <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" className={`fill-current ${isSelectedEdge ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                      </marker>
+                    </defs>
                   </g>
                 );
               })}
             </svg>
 
+            {/* Render all the nodes */}
             {nodes.map(node => (
               <AgentNodeComponent
                 key={node.id} node={node}
                 isSelected={selectedNodeId === node.id}
                 isConnectingFrom={connectingFromNodeId === node.id}
                 onNodeClick={handleNodeClick} onNodeMouseDown={handleNodeMouseDown}
-                isProcessingNode={currentProcessingNodeId === node.id && (isProcessing || (!!nodeErrors[node.id] && processingError !== null) )}
+                isProcessingNode={currentProcessingNodeId === node.id && isProcessing}
                 hasError={!!nodeErrors[node.id]}
               />
             ))}
           </div>
         </div>
 
+        {/* The right-side panel for editing, logs, and final output */}
         <div className="w-96 min-w-[350px] max-w-[450px] flex-shrink-0 border-l border-gray-300 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800 overflow-y-auto">
           <div className="flex-shrink-0 basis-1/3 min-h-[250px] border-b border-gray-300 dark:border-gray-700 overflow-y-auto">
             <AgentEditPanel

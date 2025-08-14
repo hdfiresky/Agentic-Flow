@@ -12,6 +12,13 @@ interface AgentNodeProps {
   hasError?: boolean;
 }
 
+/**
+ * @what Renders a specific icon based on the node's type.
+ * @why Provides a quick visual cue to differentiate between Start, End, Agent, and Conditional nodes.
+ * @how It uses a switch statement on the `type` prop to return the corresponding SVG icon component.
+ * @param {{ type: NodeType }} props - The properties for the component, containing the node type.
+ * @returns {React.ReactElement | null} An SVG icon.
+ */
 const NodeIcon: React.FC<{ type: NodeType }> = ({ type }) => {
   switch (type) {
     case NodeType.START:
@@ -37,6 +44,11 @@ const NodeIcon: React.FC<{ type: NodeType }> = ({ type }) => {
   }
 };
 
+/**
+ * @what Renders an icon indicating that internet search is enabled for an agent.
+ * @why To provide a clear visual indicator on the node itself.
+ * @returns {React.ReactElement} An SVG icon.
+ */
 const InternetSearchIcon: React.FC = () => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-sky-500 dark:text-sky-400 ml-auto" aria-labelledby="internetSearchIconTitle">
     <title id="internetSearchIconTitle">Internet Search Enabled</title>
@@ -45,19 +57,33 @@ const InternetSearchIcon: React.FC = () => (
 );
 
 
+/**
+ * @what A React component that visually represents a single agent node on the canvas.
+ * @why This component is the primary building block of the flowchart, displaying all relevant
+ * information for a node and handling user interactions like clicking and dragging.
+ * @how It receives a `node` object and various state flags (`isSelected`, `isProcessingNode`, etc.) as props.
+ * It dynamically computes CSS classes to reflect the node's current state (e.g., adding a colored ring for selection or errors).
+ * It displays the node's type, icon, description, and, if available, its most recent input, output, and any web sources.
+ * @param {AgentNodeProps} props - The properties for the component.
+ * @returns {React.ReactElement} A `div` element representing the node.
+ */
 const AgentNodeComponent: React.FC<AgentNodeProps> = ({ node, isSelected, isConnectingFrom, onNodeClick, onNodeMouseDown, isProcessingNode, hasError }) => {
+  // Base classes for all nodes
   const baseClasses = "absolute cursor-pointer shadow-lg rounded-lg transition-all duration-150 ease-in-out flex flex-col items-start justify-between overflow-hidden";
+  // Dynamic classes based on state
   const selectedClasses = isSelected ? "ring-2 ring-indigo-500 dark:ring-indigo-400 shadow-xl" : "ring-1 ring-gray-300 dark:ring-gray-600";
   const connectingFromClasses = isConnectingFrom ? "ring-2 ring-green-500 dark:ring-green-400" : "";
   const processingClasses = isProcessingNode ? "animate-pulse ring-2 ring-yellow-500 dark:ring-yellow-400" : "";
   const errorClasses = hasError ? "ring-2 ring-red-600 dark:ring-red-500 border-red-600 dark:border-red-500" : "";
 
+  // Set background color based on node type
   let bgColor = "bg-white dark:bg-gray-800";
   if (node.type === NodeType.START) bgColor = "bg-green-50 dark:bg-green-900";
   else if (node.type === NodeType.END) bgColor = "bg-red-50 dark:bg-red-900";
   else if (node.type === NodeType.AGENT) bgColor = "bg-blue-50 dark:bg-blue-900";
-  else if (node.type === NodeType.CONDITIONAL_AGENT) bgColor = "bg-orange-50 dark:bg-orange-900"; // New color
+  else if (node.type === NodeType.CONDITIONAL_AGENT) bgColor = "bg-orange-50 dark:bg-orange-900";
   
+  // Format the node type for display (e.g., 'CONDITIONAL_AGENT' -> 'CONDITIONAL AGENT')
   const displayNodeType = node.type.toString().replace(/_/g, ' ');
 
   return (
@@ -74,6 +100,7 @@ const AgentNodeComponent: React.FC<AgentNodeProps> = ({ node, isSelected, isConn
       aria-label={`Node ${displayNodeType}: ${node.description}`}
       aria-selected={isSelected}
     >
+      {/* Top section: Icon, Type, Description */}
       <div className="p-3 w-full">
         <div className="flex items-center mb-1">
           <NodeIcon type={node.type} />
@@ -84,6 +111,7 @@ const AgentNodeComponent: React.FC<AgentNodeProps> = ({ node, isSelected, isConn
           {node.description || "No description"}
         </p>
       </div>
+       {/* Bottom section: Input/Output and Grounding Metadata */}
        {(node.output || node.lastProcessedInput || (node.groundingMetadata && node.groundingMetadata.length > 0)) && (
          <div className="mt-auto w-full bg-gray-50 dark:bg-gray-700 p-2 border-t border-gray-200 dark:border-gray-600 max-h-[70px] overflow-y-auto text-xs">
            {node.lastProcessedInput && (
